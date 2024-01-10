@@ -1,0 +1,17 @@
+name: brium-raylib
+version: 0.1.0
+
+authors:
+  - Gustavo Giráldez <ggiraldez@manas.tech>
+
+targets:
+  brium-raylib:
+    main: src/main.cr
+
+dependencies:
+  raylib-cr:
+    github: sol-vin/raylib-cr
+
+crystal: '>= 1.10.1'
+
+license: MIT
