@@ -15,7 +15,7 @@ brium_input = Channel(String).new
 brium_output = Channel(String).new
 quit = Channel(Nil).new
 
-spawn do    
+spawn do
   brium = Brium.new
   while message = brium_input.receive
     brium_output.send ">> #{message}\n\n"
@@ -41,7 +41,7 @@ spawn do
       scroll.y = -lines * TEXT_SIZE
     else
     end
-    
+
     Raylib.begin_drawing
     Raylib.clear_background(Raylib::RAYWHITE)
 
@@ -66,7 +66,7 @@ spawn do
     if Raylib.key_down?(Raylib::KeyboardKey::Down)
       scroll.y -= SCROLL_SPEED
     end
-    
+
     text_bounds = Raylib::Rectangle.new(
       x: PADDING,
       y: input_top,
@@ -97,13 +97,25 @@ spawn do
     Raylib.begin_scissor_mode(view.x, view.y, view.width, view.height)
     y = scroll.y + view.y + PADDING/2
     buffer.each_line do |line|
-      Raylib.draw_text(line, PADDING * 1.5, y, 20, Raylib::BLACK)
-      y += 20
+      end_index = line.size()
+      start_index = 0
+      while end_index > start_index
+        index = end_index
+        text_width = Raylib.measure_text(line[start_index..index], 20)
+        while index > start_index && text_width > view.width - PADDING * 1.5
+          index -= 1
+          text_width = Raylib.measure_text(line[start_index..index], 20)
+        end
+
+        Raylib.draw_text(line[start_index..index], PADDING * 1.5, y, 20, Raylib::BLACK)
+        y += 20
+        start_index = index + 1
+      end
     end
     Raylib.end_scissor_mode
 
     Raylib.end_drawing
-    
+
     Fiber.yield
   end
 
