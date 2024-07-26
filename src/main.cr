@@ -166,6 +166,7 @@ class App
     font = Raylib.load_font_ex("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", TEXT_SIZE, nil, 0)
     if font != Raylib.get_font_default
       Raygui.set_font(font)
+      Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSpacing, TEXT_SPACING)
       @font = font
     end
   end
