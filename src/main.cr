@@ -6,6 +6,7 @@ class App
   PADDING = 20
   SCROLLBAR_SIZE = 20
   TEXT_SIZE = 20
+  TEXT_SPACING = 0
   BORDER_WIDTH = 1
   SCROLL_SPEED = 10
 
@@ -19,6 +20,8 @@ class App
   @scroll = Raylib::Vector2.new
   @input_buffer = Array(UInt8).new(256, 0)
   @view = Raylib::Rectangle.new
+
+  @font : Raylib::Font?
 
   def start_brium_fiber
     spawn do
@@ -43,7 +46,7 @@ class App
 
   def layout_lines(lines, width)
     view_lines = [] of String
-    puts "Laying out #{lines.size} with width #{width}"
+    # puts "Laying out #{lines.size} lines of text with width #{width}"
     lines.each do |line|
       end_index = line.size()
       start_index = 0
@@ -55,7 +58,7 @@ class App
 
       while end_index > start_index
         index = end_index
-        text_width = Raylib.measure_text(line[start_index..index], TEXT_SIZE)
+        text_width = measure_text(line[start_index..index], TEXT_SIZE)
         while index > start_index && text_width > width
           # FIXME: do a biscection here, instead of a linear search
           index -= 1
@@ -63,10 +66,10 @@ class App
             index -= 1
           end
 
-          text_width = Raylib.measure_text(line[start_index..index], TEXT_SIZE)
+          text_width = measure_text(line[start_index..index], TEXT_SIZE)
         end
         if index == start_index
-          puts "Given width too narrow to layout remaining text"
+          puts "Width too narrow to layout remaining text"
           view_lines << line[start_index..]
           break
         end
@@ -77,6 +80,14 @@ class App
     end
 
     view_lines
+  end
+
+  def measure_text(text, size)
+    if font = @font
+      Raylib.measure_text_ex(font, text, size, TEXT_SPACING).x
+    else
+      Raylib.measure_text(text, size)
+    end
   end
 
   def handle_user_input
@@ -137,17 +148,35 @@ class App
         next
       end
 
-      Raylib.draw_text(line, view.x + PADDING/2, y, TEXT_SIZE, TEXT_COLOR)
+      draw_text(line, view.x + PADDING/2, y, TEXT_SIZE, TEXT_COLOR)
       y += TEXT_SIZE
     end
     Raylib.end_scissor_mode
   end
 
+  def draw_text(text, x, y, size, color)
+    if font = @font
+      Raylib.draw_text_ex(font, text, Raylib::Vector2.new(x: x, y: y), size, TEXT_SPACING, color)
+    else
+      Raylib.draw_text(text, x, y, size, color)
+    end
+  end
+
+  def try_load_font
+    font = Raylib.load_font_ex("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", TEXT_SIZE, nil, 0)
+    if font != Raylib.get_font_default
+      Raygui.set_font(font)
+      @font = font
+    end
+  end
+
   def run
-    Raylib.init_window(800, 450, "Brium")
+    Raylib.init_window(600, 450, "Brium")
     Raylib.set_target_fps(60)
     Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSize, TEXT_SIZE)
     Raygui.set_style(Raygui::Control::ListView, Raygui::ListViewProperty::ScrollBarWidth, SCROLLBAR_SIZE)
+
+    try_load_font
 
     start_brium_fiber
 
