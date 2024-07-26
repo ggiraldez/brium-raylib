@@ -2,70 +2,104 @@ require "raylib-cr"
 require "raylib-cr/raygui"
 require "./brium"
 
-Raylib.init_window(800, 450, "Brium")
-Raylib.set_target_fps(60)
+class App
+  PADDING = 20
+  SCROLLBAR_SIZE = 20
+  TEXT_SIZE = 20
+  BORDER_WIDTH = 1
+  SCROLL_SPEED = 10
 
-PADDING = 20
-SCROLLBAR_SIZE = 20
-TEXT_SIZE = 20
-BORDER_WIDTH = 1
-SCROLL_SPEED = 10
+  TEXT_COLOR = Raylib::Color.new r: 80, g: 80, b: 80, a: 255
 
-brium_input = Channel(String).new
-brium_output = Channel(String).new
-quit = Channel(Nil).new
+  @brium_input = Channel(String).new
+  @brium_output = Channel(String).new
 
-spawn do
-  brium = Brium.new
-  while message = brium_input.receive
-    brium_output.send ">> #{message}\n\n"
-    response = brium.send_message message
-    brium_output.send "#{response}\n"
+  @buffer = ""
+  @lines = [] of String
+  @scroll = Raylib::Vector2.new
+  @input_buffer = Array(UInt8).new(256, 0)
+  @view = Raylib::Rectangle.new
+
+  def start_brium_fiber
+    spawn do
+      brium = Brium.new
+      while message = @brium_input.receive
+        @brium_output.send ">> #{message}\n\n"
+        response = brium.send_message message
+        @brium_output.send "#{response}\n"
+      end
+    end
   end
-end
 
-spawn do
-  brium_input.send "?"
-  show_text = false
-  buffer = ""
-  lines = 0
-  scroll = Raylib::Vector2.new
-  input_buffer = Array(UInt8).new(256, 0)
-
-  until Raylib.close_window?
-    sleep 1.milliseconds
+  def handle_brium_input
     select
-    when data = brium_output.receive
-      buffer = buffer + data
-      lines = buffer.lines.size
-      scroll.y = -lines * TEXT_SIZE
+    when data = @brium_output.receive
+      @buffer += data
+      @lines = layout_lines(@buffer.lines, @view.width - PADDING)
+      @scroll.y = -@lines.size * TEXT_SIZE
     else
     end
+  end
 
-    Raylib.begin_drawing
-    Raylib.clear_background(Raylib::RAYWHITE)
+  def layout_lines(lines, width)
+    view_lines = [] of String
+    puts "Laying out #{lines.size} with width #{width}"
+    lines.each do |line|
+      end_index = line.size()
+      start_index = 0
 
-    Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSize, TEXT_SIZE)
-    Raygui.set_style(Raygui::Control::ListView, Raygui::ListViewProperty::ScrollBarWidth, SCROLLBAR_SIZE)
-
-    input_height = 32
-    input_top = Raylib.get_screen_height - input_height - PADDING
-    inner_width = Raylib.get_screen_width - 2 * PADDING
-
-    if Raylib.key_pressed?(Raylib::KeyboardKey::Enter)
-      input_message = String.new(input_buffer.to_unsafe, input_buffer.size).strip
-      if !input_message.blank?
-        brium_input.send input_message
+      if end_index == 0
+        view_lines << line
+        next
       end
-      input_buffer.fill(0)
+
+      while end_index > start_index
+        index = end_index
+        text_width = Raylib.measure_text(line[start_index..index], TEXT_SIZE)
+        while index > start_index && text_width > width
+          # FIXME: do a biscection here, instead of a linear search
+          index -= 1
+          while index > start_index && line[index] != ' '
+            index -= 1
+          end
+
+          text_width = Raylib.measure_text(line[start_index..index], TEXT_SIZE)
+        end
+        if index == start_index
+          puts "Given width too narrow to layout remaining text"
+          view_lines << line[start_index..]
+          break
+        end
+
+        view_lines << line[start_index..index]
+        start_index = index + 1
+      end
+    end
+
+    view_lines
+  end
+
+  def handle_user_input
+    if Raylib.key_pressed?(Raylib::KeyboardKey::Enter)
+      input_message = String.new(@input_buffer.to_unsafe, @input_buffer.size).strip
+      if !input_message.blank?
+        @brium_input.send input_message
+      end
+      @input_buffer.fill(0)
     end
 
     if Raylib.key_down?(Raylib::KeyboardKey::Up)
-      scroll.y += SCROLL_SPEED
+      @scroll.y += SCROLL_SPEED
     end
     if Raylib.key_down?(Raylib::KeyboardKey::Down)
-      scroll.y -= SCROLL_SPEED
+      @scroll.y -= SCROLL_SPEED
     end
+  end
+
+  def render_ui
+    input_height = 32
+    input_top = Raylib.get_screen_height - input_height - PADDING
+    inner_width = Raylib.get_screen_width - 2 * PADDING
 
     text_bounds = Raylib::Rectangle.new(
       x: PADDING,
@@ -75,8 +109,8 @@ spawn do
     )
     Raygui.text_box(
       text_bounds,
-      input_buffer.to_unsafe,
-      input_buffer.size,
+      @input_buffer.to_unsafe,
+      @input_buffer.size,
       true
     )
 
@@ -90,38 +124,53 @@ spawn do
       x: 0,
       y: 0,
       width: inner_width - SCROLLBAR_SIZE - 2*BORDER_WIDTH,
-      height: lines * TEXT_SIZE + PADDING,
+      height: @lines.size * TEXT_SIZE + PADDING,
     )
-    Raygui.scroll_panel(bounds, nil, content_rec, pointerof(scroll), out view)
+    Raygui.scroll_panel(bounds, nil, content_rec, pointerof(@scroll), out view)
+    @view = view
 
     Raylib.begin_scissor_mode(view.x, view.y, view.width, view.height)
-    y = scroll.y + view.y + PADDING/2
-    buffer.each_line do |line|
-      end_index = line.size()
-      start_index = 0
-      while end_index > start_index
-        index = end_index
-        text_width = Raylib.measure_text(line[start_index..index], 20)
-        while index > start_index && text_width > view.width - PADDING * 1.5
-          index -= 1
-          text_width = Raylib.measure_text(line[start_index..index], 20)
-        end
-
-        Raylib.draw_text(line[start_index..index], PADDING * 1.5, y, 20, Raylib::BLACK)
-        y += 20
-        start_index = index + 1
+    y = @scroll.y + view.y + PADDING/2
+    @lines.each do |line|
+      if line.size == 0
+        y += TEXT_SIZE
+        next
       end
+
+      Raylib.draw_text(line, view.x + PADDING/2, y, TEXT_SIZE, TEXT_COLOR)
+      y += TEXT_SIZE
     end
     Raylib.end_scissor_mode
-
-    Raylib.end_drawing
-
-    Fiber.yield
   end
 
-  quit.send nil
+  def run
+    Raylib.init_window(800, 450, "Brium")
+    Raylib.set_target_fps(60)
+    Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSize, TEXT_SIZE)
+    Raygui.set_style(Raygui::Control::ListView, Raygui::ListViewProperty::ScrollBarWidth, SCROLLBAR_SIZE)
+
+    start_brium_fiber
+
+    @brium_input.send "?"
+
+    until Raylib.close_window?
+      Raylib.begin_drawing
+      begin
+        Raylib.clear_background(Raylib::RAYWHITE)
+        render_ui
+      end
+      Raylib.end_drawing
+
+      # Fiber.yield
+      sleep 1.milliseconds
+
+      handle_brium_input
+      handle_user_input
+    end
+
+    Raylib.close_window
+  end
 end
 
-quit.receive
+App.new.run
 
-Raylib.close_window
