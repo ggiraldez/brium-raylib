@@ -1,7 +1,6 @@
 require "http/headers"
 require "http/client"
 
-
 class Brium
   def initialize
     @access_token = File.read("#{ENV["HOME"]}/.config/brium/.access_token").strip
