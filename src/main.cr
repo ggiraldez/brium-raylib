@@ -2,27 +2,43 @@ require "raylib-cr"
 require "raylib-cr/raygui"
 require "./brium"
 
-class TextRenderer
+class TextView
   getter font : Raylib::Font
   getter text_size : Float32
   getter text_spacing : Float32
 
+  getter text : String = ""
+  getter width : Float32?
+
+  @lines = [] of String
+
   def initialize(@font, @text_size, @text_spacing)
+  end
+
+  def set_text(@text)
+  end
+
+  def set_width(width : Float32)
+    @width = width
   end
 
   def line_height
     @text_size
   end
 
-  def layout_lines(lines, width)
-    view_lines = [] of String
-    # puts "Laying out #{lines.size} lines of text with width #{width}"
-    lines.each do |line|
+  def compute_height
+    @lines.size * line_height
+  end
+
+  def force_layout
+    width = @width || 0_f32
+    @lines.clear
+    @text.lines.each do |line|
       end_index = line.size
       start_index = 0
 
       if end_index == 0
-        view_lines << line
+        @lines << line
         next
       end
 
@@ -30,7 +46,9 @@ class TextRenderer
         index = end_index
         text_width = Raylib.measure_text_ex(@font, line[start_index..index], @text_size, @text_spacing).x
         while index > start_index && text_width > width
-          # FIXME: do a biscection here, instead of a linear search
+          # FIXME: Instead of starting from the end, start from 0 and move
+          # forward character by character using the GlyphInfo and atlas
+          # rectangles from Raylib
           index -= 1
           while index > start_index && line[index] != ' '
             index -= 1
@@ -40,30 +58,24 @@ class TextRenderer
         end
         if index == start_index
           puts "Width too narrow to layout remaining text"
-          view_lines << line[start_index..]
+          @lines << line[start_index..]
           break
         end
 
-        view_lines << line[start_index..index]
+        @lines << line[start_index..index]
         start_index = index + 1
       end
     end
-
-    view_lines
   end
 
-  def draw_text(text, x, y, color)
-    Raylib.draw_text_ex(@font, text, Raylib::Vector2.new(x: x, y: y), @text_size, @text_spacing, color)
-  end
-
-  def render_text_buffer(view_lines, x, y, color)
-    view_lines.each do |line|
+  def render(x, y, color)
+    @lines.each do |line|
       if line.size == 0
         y += line_height
         next
       end
 
-      draw_text(line, x, y, color)
+      Raylib.draw_text_ex(@font, line, Raylib::Vector2.new(x: x, y: y), @text_size, @text_spacing, color)
       y += line_height
     end
   end
@@ -83,25 +95,26 @@ class App
   @brium_output = Channel(String).new
 
   @buffer = ""
-  @lines = [] of String
   @scroll = Raylib::Vector2.new
   @input_buffer = Array(UInt8).new(256, 0)
   @view = Raylib::Rectangle.new
 
-  @text_renderer : TextRenderer?
+  @text_view : TextView?
 
-  def text_renderer
-    @text_renderer.not_nil!
+  def text_view
+    @text_view.not_nil!
   end
 
-  def init_text_renderer
+  def init_text_view
+    # FIXME: Load more codepoints for the fonts, otherwise only the standard
+    # ASCII chars are supported
     font = Raylib.load_font_ex("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", TEXT_SIZE, nil, 0)
     if font != Raylib.get_font_default
       Raygui.set_font(font)
       Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSpacing, TEXT_SPACING)
     end
 
-    @text_renderer = TextRenderer.new(font, TEXT_SIZE, TEXT_SPACING)
+    @text_view = TextView.new(font, TEXT_SIZE, TEXT_SPACING)
   end
 
   def start_brium_fiber
@@ -119,8 +132,10 @@ class App
     select
     when data = @brium_output.receive
       @buffer += data
-      @lines = text_renderer.layout_lines(@buffer.lines, @view.width - PADDING)
-      @scroll.y = -@lines.size * text_renderer.line_height
+      text_view.set_text(@buffer)
+      text_view.set_width(@view.width - PADDING)
+      text_view.force_layout()
+      @scroll.y = -text_view.compute_height()
     else
     end
   end
@@ -170,14 +185,13 @@ class App
       x: 0,
       y: 0,
       width: inner_width - SCROLLBAR_SIZE - 2*BORDER_WIDTH,
-      height: @lines.size * text_renderer.line_height + PADDING,
+      height: text_view.compute_height(),
     )
     Raygui.scroll_panel(bounds, nil, content_rec, pointerof(@scroll), out view)
     @view = view
 
     Raylib.begin_scissor_mode(view.x, view.y, view.width, view.height)
-    text_renderer.render_text_buffer(
-      @lines,
+    text_view.render(
       view.x + PADDING/2,
       @scroll.y + view.y + PADDING/2,
       TEXT_COLOR
@@ -191,7 +205,7 @@ class App
     Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSize, TEXT_SIZE)
     Raygui.set_style(Raygui::Control::ListView, Raygui::ListViewProperty::ScrollBarWidth, SCROLLBAR_SIZE)
 
-    init_text_renderer
+    init_text_view
 
     start_brium_fiber
 
