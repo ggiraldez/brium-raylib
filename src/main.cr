@@ -8,17 +8,25 @@ class TextView
   getter text_spacing : Float32
 
   getter text : String = ""
-  getter width : Float32?
+  getter width : Float32 = 0
 
   @lines = [] of String
+  @layout_pending = false
 
   def initialize(@font, @text_size, @text_spacing)
   end
 
-  def set_text(@text)
+  def set_text(text : String)
+    if text != @text
+      @layout_pending = true
+    end
+    @text = text
   end
 
-  def set_width(width : Float32)
+  def width=(width : Float32)
+    if width != @width
+      @layout_pending = true
+    end
     @width = width
   end
 
@@ -27,48 +35,65 @@ class TextView
   end
 
   def compute_height
+    if @layout_pending
+      force_layout
+    end
+
     @lines.size * line_height
   end
 
   def force_layout
-    width = @width || 0_f32
     @lines.clear
     @text.lines.each do |line|
       end_index = line.size
       start_index = 0
 
-      if end_index == 0
+      # Short-circuit for empty lines or when our width is still not initialized
+      if end_index.zero? || @width.zero?
         @lines << line
         next
       end
 
+      # Split each input line into one or more display lines (ie. lines with
+      # text that when rendered would fit in the given width)
       while end_index > start_index
-        index = end_index
-        text_width = Raylib.measure_text_ex(@font, line[start_index..index], @text_size, @text_spacing).x
-        while index > start_index && text_width > width
-          # FIXME: Instead of starting from the end, start from 0 and move
-          # forward character by character using the GlyphInfo and atlas
-          # rectangles from Raylib
-          index -= 1
-          while index > start_index && line[index] != ' '
-            index -= 1
+        index = start_index
+        break_index = 0
+        text_width = 0
+
+        while index < end_index
+          index = line.index(' ', index + 1) || end_index
+
+          fragment = if break_index <= 0
+                       line[start_index..index]
+                     else
+                       line[break_index+1..index]
+                     end
+          text_width += Raylib.measure_text_ex(@font, fragment, @text_size, @text_spacing).x
+
+          if break_index <= 0
+            break_index = index
           end
 
-          text_width = Raylib.measure_text_ex(@font, line[start_index..index], @text_size, @text_spacing).x
-        end
-        if index == start_index
-          puts "Width too narrow to layout remaining text"
-          @lines << line[start_index..]
-          break
+          if text_width <= @width
+            break_index = index
+          else
+            break
+          end
         end
 
-        @lines << line[start_index..index]
-        start_index = index + 1
+        @lines << line[start_index..break_index]
+        start_index = break_index + 1
       end
     end
+    @layout_pending = false
   end
 
   def render(x, y, color)
+    if @layout_pending
+      force_layout
+    end
+
     @lines.each do |line|
       if line.size == 0
         y += line_height
@@ -133,8 +158,6 @@ class App
     when data = @brium_output.receive
       @buffer += data
       text_view.set_text(@buffer)
-      text_view.set_width(@view.width - PADDING)
-      text_view.force_layout()
       @scroll.y = -text_view.compute_height()
     else
     end
@@ -191,6 +214,7 @@ class App
     @view = view
 
     Raylib.begin_scissor_mode(view.x, view.y, view.width, view.height)
+    text_view.width = view.width - PADDING/2
     text_view.render(
       view.x + PADDING/2,
       @scroll.y + view.y + PADDING/2,
@@ -201,6 +225,7 @@ class App
 
   def run
     Raylib.init_window(600, 450, "Brium")
+    Raylib.set_window_state(Raylib::ConfigFlags::WindowResizable)
     Raylib.set_target_fps(60)
     Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSize, TEXT_SIZE)
     Raygui.set_style(Raygui::Control::ListView, Raygui::ListViewProperty::ScrollBarWidth, SCROLLBAR_SIZE)
