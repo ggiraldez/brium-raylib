@@ -131,9 +131,9 @@ class App
   end
 
   def init_text_view
-    # FIXME: Load more codepoints for the fonts, otherwise only the standard
-    # ASCII chars are supported
-    font = Raylib.load_font_ex("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", TEXT_SIZE, nil, 0)
+    codepoints = (32..126).to_a
+    "áéíóúàèìòùäëïöüñâêîôûßæœµç".each_char { |c| codepoints << c.ord << c.upcase.ord }
+    font = Raylib.load_font_ex("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", TEXT_SIZE, codepoints, codepoints.size)
     if font != Raylib.get_font_default
       Raygui.set_font(font)
       Raygui.set_style(Raygui::Control::Default, Raygui::DefaultProperty::TextSpacing, TEXT_SPACING)
